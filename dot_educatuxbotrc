@@ -1,0 +1,9 @@
+[TELEGRAM]
+EDUCATUXBOT = very_big_serial_provided_by_bot_father
+EDUCATUXBOTADMS =
+
+[MYSQL]
+DBUSER = mysqluser
+DBPASSWORD = mysqlpassword
+DBHOST = 127.0.0.1
+DBPORT = 3306
