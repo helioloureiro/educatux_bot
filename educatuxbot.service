@@ -1,0 +1,14 @@
+[Unit]
+Description=EducatuX bot
+After=syslog.target network.target
+
+[Service]
+User=educatuxbot
+Group=educatuxbot
+ExecStart= /usr/bin/python3 /home/educatuxbot/educatux_bot/educatuxbot.py
+Type=simple
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
