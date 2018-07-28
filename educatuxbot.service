@@ -5,6 +5,7 @@ After=syslog.target network.target
 [Service]
 User=educatuxbot
 Group=educatuxbot
+ExecStartPre=cd /home/educatuxbot/educatux_bot; /usr/bin/git pull -f
 ExecStart= /usr/bin/python3 /home/educatuxbot/educatux_bot/educatuxbot.py
 Type=simple
 Restart=always
