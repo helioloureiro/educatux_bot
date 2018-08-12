@@ -41,10 +41,11 @@ UNSAFE = "/unsafe"
 RESPONSES_TEXT = {
     "/start" : "Bem-vindo ao jogo de perguntas e repostas do EducatuX.",
     "/jogar" :  "Iniciando o jogo.",
-    "/unsafe" : "Para jogar inicie uma sessão privada com o bot."
+    "/unsafe" : "Para jogar inicie uma sessão privada com o bot.",
+    "/version" : __version__
     }
 COMMANDS = {
-    "/reboot" : "os._exit(os.EX_OK)"
+    "/reboot" : True
 }
 
 ### Refactoring
@@ -93,6 +94,7 @@ class TelegramBotInterface:
     def check_if_run(self):
         pid = self.read_file(self.PIDFILE)
         current_pid = os.getpid()
+        debug("current_pid=%d" % current_pid)
         if pid is None:
             return
         try:
@@ -136,18 +138,23 @@ class TelegramBotInterface:
             return RESPONSES_TEXT[question.lower()]
         return None
 
-    def getRank(self, username):
-        debug("getRank() username=%s" % username)
+    def getRank(self, user_id, status=False):
+        debug("getRank() user_id=%s" % user_id)
         debug(self.user_data)
-        if not username in self.user_data:
-            self.user_data[username] = {
+        if not user_id in self.user_data:
+            self.user_data[user_id] = {
+                'username' :  None,
                 'rank' : 0,
                 'questions' : 0,
                 'answers' : 0,
-                'level' : 0
+                'level' : 0,
+                'previous_message' : 0,
+                'expected_answer' : None
                 }
             debug(self.user_data)
-        return self.user_data[username]['rank']
+        rank = float(self.user_data[user_id]['answers']) / float(self.user_data[user_id]['questions']) * 100
+        self.user_data[user_id]['rank'] = rank
+        return self.user_data[user_id]['rank']
 
     def reply_text(self, session, text):
         """ Generic interface to answer """
@@ -176,9 +183,9 @@ class TelegramBotInterface:
             debug("User authenticated as %s." % session.chat.username)
             if session.text in COMMANDS:
                 debug(" * session.text=%s" % session.text)
-                command = COMMANDS[session.text]
-                debug(" * command=%s" % command)
-                eval(command)
+                self.run_commands(session.text)
+                return True
+        return False
 
     def is_it_safe(self, session):
         debug("is_it_safe()")
@@ -207,6 +214,75 @@ class TelegramBotInterface:
             msg = MISUNDERSTAND
             self.reply_text(session, msg)
 
+    def gaming(self, session):
+        debug(sys._getframe().f_code.co_name)
+        question = """Responda a correta
+a) alguma coisa
+b) alguma coisa
+c) coisa correta
+d) coisa errada
+e) todas as coisas
+"""
+        markup = telebot.types.ReplyKeyboardMarkup(row_width=2,
+                                                   one_time_keyboard=True)
+        itembtna = telebot.types.KeyboardButton('a')
+        itembtnb = telebot.types.KeyboardButton('b')
+        itembtnc = telebot.types.KeyboardButton('c')
+        itembtnd = telebot.types.KeyboardButton('d')
+        itembtne = telebot.types.KeyboardButton('e')
+        markup.add(itembtna,
+                itembtnb,
+                itembtnc,
+                itembtnd,
+                itembtne)
+        debug(session)
+        user_id = session.from_user.id
+        username = session.from_user.username
+        message_id = int(session.message_id) + 1 # setting the next
+        expected_answer = 'c'
+        self.getRank(user_id)
+        self.setMessageID(user_id, message_id)
+        self.setExpectedAnswer(user_id, expected_answer)
+        self.incrementQuestions(user_id)
+        self.bot.send_message(session.chat.id, question, reply_markup=markup)
+
+    def incrementQuestions(self, user_id):
+        self.user_data[user_id]['questions'] += 1
+
+    def setMessageID(self, user_id, message_id):
+        self.user_data[user_id]['message_id'] = message_id
+
+    def setExpectedAnswer(self, user_id, expected_answer):
+        self.user_data[user_id]['expected_answer'] = expected_answer
+
+    def check_response(self, session):
+        user_id = session.from_user.id
+        username = session.from_user.username
+        message_id = int(session.message_id)
+        # stored values
+        stored_message_id = self.getStoredMessageID(user_id)
+        stored_response = self.getStoredResponse(user_id)
+        if (stored_message_id + 1 != message_id):
+            self.bot.reply_to(session, "Resposta não identificada.")
+            # send reset here
+            return
+        if stored_response == session.text:
+            self.incrementAnswers(user_id)
+            rank = self.getRank(user_id)
+            self.bot.reply_to(session, "Parabéns!  Resposta correta. Taxa de acertos em %2.2f%%" % rank)
+        else:
+            self.bot.reply_to(session, "Infelizmente você errou.  A resposta correta era: %s" % stored_response)
+        # send reset here
+
+    def incrementAnswers(self, user_id):
+        self.user_data[user_id]['answers'] += 1
+
+    def getStoredMessageID(self, user_id):
+        return self.user_data[user_id]['message_id']
+
+    def getStoredResponse(self, user_id):
+        return self.user_data[user_id]['expected_answer']
+
     def initialized_shared_memory(self, shared_dictionary):
         debug(sys._getframe().f_code.co_name)
         self.user_data = None
@@ -223,6 +299,10 @@ class TelegramBotInterface:
             self.user_data = shared_dictionary
         debug("shared memory initialized")
 
+    def displayRank(self, session):
+        rank = self.getRank(session.from_user.id)
+        self.bot.send_message(session.chat.id, "Seu índice de acerto é de %02.2f%%" % rank)
+
     def dump_data(self):
         with open(self.userdb, 'wb') as fd:
             pickle.dump(self.user_data, fd)
@@ -231,6 +311,11 @@ class TelegramBotInterface:
         debug("Shuttingdow safely")
         self.dump_data()
         self.remove_lock()
+
+    def run_commands(self, command):
+        debug("run_commands(): command=%s" % command)
+        if command == "/reboot":
+            return True
 
 botintf = TelegramBotInterface()
 #with Manager() as mngr:
@@ -251,10 +336,39 @@ def main():
     sys.exit(os.EX_OK)
 
 ### Bot callbacks below ###
-@bot.message_handler(func=lambda m: True)
+@bot.message_handler(commands=["reboot"])
+def reboot(session):
+    debug("Calling reboot()")
+    if botintf.get_commands(session):
+        debug("stop_polling()")
+        bot.stop_polling()
+        debug("bot stop")
+        bot.stop_bot()
+        sys.exit(os.EX_OK)
+
+@bot.message_handler(commands=["rank"])
+def rank(session):
+    debug(session.text)
+    botintf.displayRank(session)
+
+
+@bot.message_handler(commands=["jogar"])
 def talking(session):
     debug(session.text)
+    botintf.gaming(session)
+
+
+@bot.message_handler(func=lambda m: True)
+def talking(session):
+    responses = [ 'a', 'b', 'c', 'd', 'e' ]
+    if session.text in responses:
+        botintf.check_response(session)
+        return
+    debug(session.text)
+    debug("Reply: %s" % session.reply_to_message)
+    debug(session)
     botintf.bot_talk(session)
+
 
 
 if __name__ == '__main__':
